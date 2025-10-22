@@ -31,9 +31,16 @@ const ChatConfig = () => {
       });
 
       if (response.data.success) {
-        setSessionId(response.data.sessionId);
-        setStep(2); // Move to upload step
-        toast.success('Session created! Now upload your documents.');
+        // Defensive: some responses return sessionId, others return the session object
+        const sid = response.data.sessionId || response.data.session?._id || response.data.session?.id;
+        if (!sid) {
+          console.warn('Create session response missing sessionId:', response.data);
+          toast.error('Server did not return session id. Check logs.');
+        } else {
+          setSessionId(sid);
+          setStep(2); // Move to upload step
+          toast.success('Session created! Now upload your documents.');
+        }
       }
     } catch (error) {
       console.error('Create session error:', error);
@@ -87,6 +94,9 @@ const ChatConfig = () => {
       console.log('✅ Job description uploaded');
 
       // Generate Questions
+      if (!sessionId) {
+        throw new Error('Missing sessionId. Please create a session first.');
+      }
       console.log('🤖 Generating interview questions...');
       const questionsResponse = await api.post(`/chat/generate-questions/${sessionId}`);
 
