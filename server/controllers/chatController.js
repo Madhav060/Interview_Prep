@@ -59,6 +59,8 @@ exports.generateQuestions = async (req, res) => {
   try {
     const { sessionId } = req.params;
 
+    console.log('📝 Generating questions for session:', sessionId);
+
     // Get session
     const chat = await Chat.findOne({ _id: sessionId, userId: req.user._id });
     if (!chat) {
@@ -74,6 +76,8 @@ exports.generateQuestions = async (req, res) => {
       sessionId 
     });
     
+    console.log('📄 Found documents:', documents.length);
+
     const resumeDoc = documents.find(doc => doc.type === 'resume');
     const jdDoc = documents.find(doc => doc.type === 'jd');
 
@@ -90,17 +94,22 @@ exports.generateQuestions = async (req, res) => {
       .join('\n\n')
       .substring(0, 3000);
 
+    console.log('📋 JD Text length:', jdText.length);
+
     // Generate questions with proper error handling
     let questionsText;
     try {
+      console.log('🤖 Calling AI to generate questions...');
       questionsText = await generateInterviewQuestions(jdText, chat.totalQuestions);
       
+      console.log('✅ AI Response received, length:', questionsText?.length);
+
       // Validate that questions were generated
       if (!questionsText || questionsText.trim().length === 0) {
-        throw new Error('Empty response from AI');
+        throw new Error('AI returned empty response');
       }
     } catch (error) {
-      console.error('Question generation failed:', error);
+      console.error('❌ Question generation failed:', error.message);
       
       // Return user-friendly error
       return res.status(500).json({
@@ -119,13 +128,15 @@ exports.generateQuestions = async (req, res) => {
 
     await chat.save();
 
+    console.log('💾 Questions saved to database');
+
     res.status(200).json({
       success: true,
       message: 'Questions generated successfully',
       questions: questionsText,
     });
   } catch (error) {
-    console.error('Generate questions error:', error);
+    console.error('❌ Generate questions error:', error);
     res.status(500).json({
       success: false,
       message: 'Error generating questions. Please try again.',
