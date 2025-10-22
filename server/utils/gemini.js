@@ -32,11 +32,11 @@ async function retryWithBackoff(fn, retries = MAX_RETRIES) {
 
 /**
  * Get the best available model for text generation
- * Priority: gemini-1.5-pro-latest > gemini-pro > gemini-1.5-flash
+ * Changed to the latest stable flash model.
  */
 function getTextGenerationModel(config = {}) {
-  // Try stable models in order of preference
-  const modelName = 'gemini-1.5-pro-latest'; // Most stable and capable
+  // Using the latest flash model for high-speed, stable generation
+  const modelName = 'gemini-2.5-flash-preview-09-2025';
   
   return genAI.getGenerativeModel({ 
     model: modelName,
@@ -85,15 +85,17 @@ exports.generateEmbeddings = async (texts) => {
     const model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
     
     // Generate embeddings for each text chunk with retry
-    const embeddingPromises = texts.map(text => 
-      retryWithBackoff(async () => {
-        const result = await model.embedContent(text);
-        return result.embedding.values;
-      })
-    );
+    // NOTE: Switched to a sequential loop to avoid rate-limiting
+    const embeddings = [];
+    for (const text of texts) {
+      const result = await retryWithBackoff(async () => {
+        const res = await model.embedContent(text);
+        return res.embedding.values;
+      });
+      embeddings.push(result);
+    }
     
-    const results = await Promise.all(embeddingPromises);
-    return results;
+    return embeddings;
   } catch (error) {
     console.error('Error generating embeddings:', error);
     throw new Error('Failed to generate embeddings: ' + error.message);
@@ -302,7 +304,7 @@ Evaluate now:`;
         let overallScore = overallMatch ? parseInt(overallMatch[1]) : Math.round((relevanceScore + correctnessScore) / 2);
         const feedback = feedbackMatch ? feedbackMatch[1].trim() : 'Good effort. Consider providing more specific details and examples in your answers.';
 
-        // Clamp scores to valid range (1-10)
+        // Clamp scores to valid range (1-1D)
         relevanceScore = Math.max(1, Math.min(10, relevanceScore));
         correctnessScore = Math.max(1, Math.min(10, correctnessScore));
         overallScore = Math.max(1, Math.min(10, overallScore));
@@ -392,3 +394,4 @@ exports.findSimilarChunks = (queryEmbedding, chunks, topK = 3) => {
     return [];
   }
 };
+
