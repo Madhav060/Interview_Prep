@@ -5,6 +5,7 @@ import api from '../utils/axios';
 
 const ChatConfig = () => {
   const [sessionName, setSessionName] = useState('');
+  // Default to 3, but allow up to 4
   const [numQuestions, setNumQuestions] = useState(3);
   const [resumeFile, setResumeFile] = useState(null);
   const [jdFile, setJdFile] = useState(null);
@@ -21,6 +22,11 @@ const ChatConfig = () => {
       toast.error('Please enter a session name');
       return;
     }
+     // Validate number of questions locally before sending
+     if (numQuestions < 2 || numQuestions > 4) {
+       toast.error('Number of questions must be between 2 and 4.');
+       return;
+     }
 
     setUploading(true);
 
@@ -105,13 +111,15 @@ const ChatConfig = () => {
       if (questionsResponse.data.success && questionsResponse.data.questions) {
         console.log('✅ Questions generated successfully');
         toast.success('Interview ready! 🎉');
-        
+
         // Small delay to show success message
         setTimeout(() => {
           navigate(`/chat/${sessionId}`);
         }, 1000);
       } else {
-        throw new Error('No questions generated');
+        // Use the error message from the response if available
+        const errorMessage = questionsResponse.data?.message || 'No questions generated or server error';
+        throw new Error(errorMessage);
       }
     } catch (error) {
       console.error('Start interview error:', error);
@@ -207,13 +215,14 @@ const ChatConfig = () => {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Number of Questions
+                  Number of Questions (2-4)
                 </label>
                 <div className="flex items-center space-x-4">
                   <input
                     type="range"
                     min="2"
-                    max="10"
+                    // **MODIFIED:** Set max to 4
+                    max="4"
                     value={numQuestions}
                     onChange={(e) => setNumQuestions(parseInt(e.target.value))}
                     className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
@@ -223,6 +232,7 @@ const ChatConfig = () => {
                   </div>
                 </div>
                 <p className="text-sm text-gray-500 mt-2">
+                  {/* Dynamically adjust text based on numQuestions */}
                   {numQuestions - 1} technical + 1 behavioral question
                 </p>
               </div>
@@ -257,7 +267,7 @@ const ChatConfig = () => {
                 label="Resume"
                 file={resumeFile}
                 onFileChange={setResumeFile}
-                accept=".pdf,.doc,.docx"
+                accept=".pdf,.doc,.docx" // Consider adding .doc, .docx if backend supports
                 icon={
                   <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -270,7 +280,7 @@ const ChatConfig = () => {
                 label="Job Description"
                 file={jdFile}
                 onFileChange={setJdFile}
-                accept=".pdf,.doc,.docx,.txt"
+                accept=".pdf,.doc,.docx,.txt" // Consider adding .doc, .docx, .txt if backend supports
                 icon={
                   <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
