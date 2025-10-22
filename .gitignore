@@ -1,0 +1,23 @@
+# ==========================
+# Node Modules
+# ==========================
+client/node_modules
+server/node_modules
+
+# ==========================
+# Environment Variables
+# ==========================
+client/.env
+server/.env
+
+# ==========================
+# Production Build Artifacts
+# ==========================
+client/dist
+client/.vite
+
+# ==========================
+# IDE / OS Specific Files
+# ==========================
+.vscode/
+.DS_Store
