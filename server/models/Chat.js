@@ -14,7 +14,9 @@ const chatSchema = new mongoose.Schema({
   },
   totalQuestions: {
     type: Number,
-    default: 3
+    default: 3,
+    min: 2,
+    max: 10
   },
   messages: [{
     role: {
@@ -80,21 +82,51 @@ chatSchema.pre('save', function(next) {
   next();
 });
 
-// Calculate final scores
+/**
+ * Calculate final scores based on evaluation messages
+ * FIXED: Now correctly calculates overall as average of relevance and correctness
+ */
 chatSchema.methods.calculateFinalScores = function() {
-  const scoredMessages = this.messages.filter(msg => msg.score !== undefined);
-  
+  // Filter messages that have scores (evaluation messages from assistant)
+  const scoredMessages = this.messages.filter(msg =>
+    msg.role === 'assistant' &&
+    typeof msg.relevanceScore === 'number' &&
+    typeof msg.correctnessScore === 'number'
+  );
+
   if (scoredMessages.length === 0) {
+    console.warn(`No valid scored messages found for chat ${this._id}`);
+    this.finalScore = undefined;
+    this.averageRelevance = undefined;
+    this.averageCorrectness = undefined;
     return;
   }
 
-  const totalScore = scoredMessages.reduce((sum, msg) => sum + msg.score, 0);
-  const totalRelevance = scoredMessages.reduce((sum, msg) => sum + (msg.relevanceScore || 0), 0);
-  const totalCorrectness = scoredMessages.reduce((sum, msg) => sum + (msg.correctnessScore || 0), 0);
+  // Calculate sums
+  let totalRelevance = 0;
+  let totalCorrectness = 0;
 
-  this.finalScore = (totalScore / scoredMessages.length).toFixed(1);
-  this.averageRelevance = (totalRelevance / scoredMessages.length).toFixed(1);
-  this.averageCorrectness = (totalCorrectness / scoredMessages.length).toFixed(1);
+  scoredMessages.forEach(msg => {
+    totalRelevance += parseFloat(msg.relevanceScore) || 0;
+    totalCorrectness += parseFloat(msg.correctnessScore) || 0;
+  });
+
+  // Calculate averages
+  const avgRelevance = totalRelevance / scoredMessages.length;
+  const avgCorrectness = totalCorrectness / scoredMessages.length;
+
+  // Store with proper precision (1 decimal place)
+  this.averageRelevance = parseFloat(avgRelevance.toFixed(1));
+  this.averageCorrectness = parseFloat(avgCorrectness.toFixed(1));
+  
+  // FIXED: Final score is the average of relevance and correctness
+  this.finalScore = parseFloat(((avgRelevance + avgCorrectness) / 2).toFixed(1));
+
+  console.log(`✅ Calculated scores for session ${this._id}:`);
+  console.log(`   - Relevance: ${this.averageRelevance}/10`);
+  console.log(`   - Correctness: ${this.averageCorrectness}/10`);
+  console.log(`   - Final: ${this.finalScore}/10`);
+  console.log(`   - Based on ${scoredMessages.length} questions`);
 };
 
 module.exports = mongoose.model('Chat', chatSchema);

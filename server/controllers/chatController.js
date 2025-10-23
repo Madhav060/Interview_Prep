@@ -254,176 +254,129 @@ const parseAnswers = (text, expectedCount) => {
 exports.submitAnswers = async (req, res) => {
   try {
     const { answersText, chatId } = req.body;
-    const userId = req.user?._id;
 
-    // Validate inputs
-    if (!userId) {
-      return res.status(401).json({ success: false, message: 'Unauthorized' });
-    }
-     if (!chatId || !mongoose.Types.ObjectId.isValid(chatId)) {
-       return res.status(400).json({ success: false, message: 'Invalid or missing Chat ID' });
-     }
-    if (!answersText || typeof answersText !== 'string' || !answersText.trim()) {
-      return res.status(400).json({ success: false, message: 'Answers text is required and must be a non-empty string' });
-    }
-
-    console.log(`📝 Submitting answers for session: ${chatId}, User: ${userId}`);
-
-    // Get chat session, ensuring it belongs to the user
-    let chat = await Chat.findOne({ _id: chatId, userId: userId });
-    if (!chat) {
-       console.warn(`Submit answers: Session not found or access denied for ${chatId}`);
-      return res.status(404).json({ success: false, message: 'Chat session not found or access denied' });
-    }
-
-    // Ensure session is not already completed
-    if (chat.isCompleted) {
-        console.warn(`Attempt to re-submit answers for completed session ${chatId}`);
-        return res.status(400).json({ success: false, message: 'This interview session is already completed.' });
-    }
-
-
-    // Get original questions from the first assistant message
-    const questionsText = chat.messages.find(msg => msg.role === 'assistant')?.content || '';
-    const questions = parseQuestions(questionsText);
-
-    if (questions.length === 0 || questions.length !== chat.totalQuestions) {
-      console.error(`Mismatch or missing questions in session ${chatId}. Found: ${questions.length}, Expected: ${chat.totalQuestions}`);
-      return res.status(500).json({ success: false, message: 'Internal error: Could not retrieve questions for this session.' });
-    }
-
-    // Parse the submitted answers text
-    const answers = parseAnswers(answersText, questions.length);
-
-    if (!answers) {
-       console.warn(`Answer parsing failed for session ${chatId}. Expected ${questions.length}. Input: ${answersText.substring(0,100)}...`);
+    if (!answersText || !answersText.trim()) {
       return res.status(400).json({
         success: false,
-        message: `Parsing failed. Please ensure you provide exactly ${questions.length} answers, each starting on a new line with the format: "1. Your answer".`,
+        message: 'Answers are required',
       });
     }
 
-    // Get session-specific resume document
-    let resumeDoc = await Document.findOne({ // Use let as it might be reassigned
-      userId: userId,
-      sessionId: chatId, // Find resume specific to this session
-      type: 'resume'
-    }).select('chunks'); // Only need chunks
-
-    let resumeContext = "No resume context was available for this evaluation.";
-    let resumeChunksForResponse = []; // For sending back to client
-
-    if (!resumeDoc || !resumeDoc.chunks || resumeDoc.chunks.length === 0) {
-      // Fallback: Try finding a global resume if session-specific one is missing
-      console.warn(`Session-specific resume not found for ${chatId}, checking for global resume...`);
-      const globalResumeDoc = await Document.findOne({
-          userId: userId,
-          sessionId: null, // Global document
-          type: 'resume'
-      }).select('chunks');
-
-      if (!globalResumeDoc || !globalResumeDoc.chunks || globalResumeDoc.chunks.length === 0) {
-        console.warn(`Resume document not found for session ${chatId} or globally for user ${userId}. Proceeding without resume context.`);
-      } else {
-         resumeDoc = globalResumeDoc; // Use global doc if found
-         console.log(`Using global resume for session ${chatId}`);
-      }
+    // Get chat session
+    let chat = await Chat.findOne({ _id: chatId, userId: req.user._id });
+    if (!chat) {
+      return res.status(404).json({
+        success: false,
+        message: 'Chat session not found',
+      });
     }
 
-    // Prepare context for evaluation ONLY IF a resumeDoc was found (either session or global)
-    if (resumeDoc && resumeDoc.chunks && resumeDoc.chunks.length > 0) {
-        // Combine all answers into one string for embedding (efficient RAG trigger)
-        const combinedAnswers = answers.map(a => a.text).join(' ');
-        const queryEmbedding = await generateEmbedding(combinedAnswers);
+    // Get questions
+    const questionsText = chat.messages[0]?.content || '';
+    const questions = parseQuestions(questionsText);
 
-        // Find relevant chunks from the resume using the combined answer embedding
-        const similarResumeChunks = findSimilarChunks(queryEmbedding, resumeDoc.chunks, 3); // Get top 3 chunks
-
-        // Create the context string for the AI evaluation prompt
-        resumeContext = similarResumeChunks
-          .map((item, idx) => `Resume Snippet ${idx+1}:\n${item.chunk.text}`)
-          .join('\n\n') || "No relevant resume snippets found matching the answers."; // Provide fallback
-
-         // Prepare chunks info for the client response
-         resumeChunksForResponse = similarResumeChunks.map((item, idx) => ({
-           index: idx + 1, // 1-based index for display
-           text: item.chunk.text.substring(0, 200) + (item.chunk.text.length > 200 ? '...' : ''), // Truncate
-           similarity: item.similarity.toFixed(3), // Format
-         }));
-         console.log(`Found ${resumeChunksForResponse.length} relevant resume chunks for evaluation.`);
-    } else {
-         console.log(`Proceeding with evaluation for session ${chatId} without resume context.`);
+    if (questions.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No questions found in session',
+      });
     }
 
+    // Parse answers
+    const answers = parseAnswers(answersText, questions.length);
+    
+    if (!answers) {
+      return res.status(400).json({
+        success: false,
+        message: `Please provide exactly ${questions.length} answers in the format: "1. Your answer\\n2. Your answer\\n..." `,
+      });
+    }
 
-    // Prepare structured Q&A pairs for the evaluation function
-    const questionsAndAnswersForEval = questions.map((q) => ({
+    // Get session-specific documents
+    const documents = await Document.find({ 
+      userId: req.user._id,
+      sessionId: chatId 
+    });
+    
+    const resumeDoc = documents.find(doc => doc.type === 'resume');
+
+    if (!resumeDoc) {
+      return res.status(400).json({
+        success: false,
+        message: 'Resume not found for this session',
+      });
+    }
+
+    // Combine all answers for embedding
+    const combinedAnswers = answers.map(a => a.text).join(' ');
+    const queryEmbedding = await generateEmbedding(combinedAnswers);
+
+    // Find similar chunks from resume (RAG)
+    const resumeChunks = findSimilarChunks(queryEmbedding, resumeDoc.chunks, 3);
+    const resumeContext = resumeChunks
+      .map(item => item.chunk.text)
+      .join('\n\n');
+
+    // Prepare questions and answers for evaluation
+    const questionsAndAnswers = questions.map((q, idx) => ({
       question: q.text,
-      // Ensure we match the answer number to the question number, default to empty string
-      answer: answers.find(a => a.number === q.number)?.text || ''
+      answer: answers[idx]?.text || ''
     }));
 
-    console.log(`🤖 Evaluating ${questionsAndAnswersForEval.length} answers for session ${chatId}...`);
-    // Call the evaluation function from gemini.js
-    const evaluations = await evaluateAllAnswers(questionsAndAnswersForEval, resumeContext);
+    // Evaluate all answers at once
+    const evaluations = await evaluateAllAnswers(questionsAndAnswers, resumeContext);
 
-    // --- Update Chat Document ---
-    // Add user's submitted answers as a single message
-     // Find the index *after* the initial questions message
-    const lastQuestionMsgIndex = chat.messages.findIndex(msg => msg.role === 'assistant' && parseQuestions(msg.content).length > 0);
-    const insertIndex = lastQuestionMsgIndex !== -1 ? lastQuestionMsgIndex + 1 : chat.messages.length;
-
-
-    chat.messages.splice(insertIndex, 0, { // Insert after questions
+    // Add user answers
+    chat.messages.push({
       role: 'user',
-      content: answersText, // Store the raw submitted text
+      content: answersText,
     });
 
-    // Add individual evaluation feedback messages AFTER the user's answers
+    // ✅ FIXED: Don't store AI's "score" field
     evaluations.forEach((evaluation, idx) => {
-        // Construct feedback message
-        const feedbackContent = `**Evaluation for Question ${idx + 1}:**\nRelevance: ${evaluation.relevanceScore}/10 | Correctness: ${evaluation.correctnessScore}/10 | **Overall: ${evaluation.score}/10**\n\n**Feedback:**\n${evaluation.feedback}`;
-
-        chat.messages.push({ // Push to the end
-            role: 'assistant', // AI provides feedback
-            content: feedbackContent,
-            // Store scores directly on the message for easier retrieval/display
-            score: evaluation.score,
-            relevanceScore: evaluation.relevanceScore,
-            correctnessScore: evaluation.correctnessScore,
-        });
+      chat.messages.push({
+        role: 'assistant',
+        content: `**Question ${idx + 1} Feedback:**\n${evaluation.feedback}`,
+        // Only store relevanceScore and correctnessScore
+        // We calculate overall ourselves in calculateFinalScores()
+        relevanceScore: evaluation.relevanceScore,
+        correctnessScore: evaluation.correctnessScore,
+      });
     });
 
-    // Mark session as completed and calculate final scores
+    // Mark as completed and calculate final scores
     chat.isCompleted = true;
-    chat.calculateFinalScores(); // Call the method defined in the Chat model
+    chat.calculateFinalScores();  // ✅ Now correctly calculates (Rel + Corr) / 2
 
     await chat.save();
-    console.log(`✅ Evaluation complete and saved for session ${chatId}`);
 
-    // --- Prepare Client Response ---
+    console.log('✅ Interview completed and scores saved');
+
     res.status(200).json({
       success: true,
-      message: 'Interview evaluation complete!',
-      // Map evaluations to include question numbers for client clarity
       evaluations: evaluations.map((e, idx) => ({
-        questionNumber: idx + 1, // Add question number
-        ...e // Spread the evaluation object (score, feedback, etc.)
+        questionNumber: idx + 1,
+        score: e.score,  // Still return AI's score to frontend for display
+        relevanceScore: e.relevanceScore,
+        correctnessScore: e.correctnessScore,
+        feedback: e.feedback
       })),
-      resumeChunksUsed: resumeChunksForResponse, // Send info about resume chunks used
-      // Send final calculated scores from the chat document
-      isCompleted: chat.isCompleted,
-      finalScore: chat.finalScore,
+      resumeChunksUsed: resumeChunks.map((item, idx) => ({
+        index: idx + 1,
+        text: item.chunk.text.substring(0, 200) + '...',
+        similarity: item.similarity.toFixed(3),
+      })),
+      isCompleted: true,
+      finalScore: chat.finalScore,  // ✅ Correctly calculated average
       averageRelevance: chat.averageRelevance,
       averageCorrectness: chat.averageCorrectness,
     });
-
   } catch (error) {
-    console.error(`❌ Submit answers error for session ${req.body.chatId}:`, error);
+    console.error('Submit answers error:', error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Server error processing answers',
-      // error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Error processing answers',
+      error: error.message,
     });
   }
 };

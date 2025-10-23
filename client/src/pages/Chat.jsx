@@ -30,7 +30,6 @@ const Chat = () => {
   const [initializing, setInitializing] = useState(true);
   const [sessionInfo, setSessionInfo] = useState(null);
   const [evaluations, setEvaluations] = useState(null);
-  const [showResumeSources, setShowResumeSources] = useState(null);
   const navigate = useNavigate();
   const { sessionId } = useParams();
 
@@ -56,13 +55,12 @@ const Chat = () => {
           
           // Extract evaluations from messages
           const evals = session.messages
-            .filter(msg => msg.role === 'assistant' && msg.score !== undefined)
+            .filter(msg => msg.role === 'assistant' && msg.relevanceScore !== undefined)
             .map((msg, idx) => ({
               questionNumber: idx + 1,
-              score: msg.score,
               relevanceScore: msg.relevanceScore,
               correctnessScore: msg.correctnessScore,
-              feedback: msg.content
+              feedback: msg.content.replace(/\*\*Question \d+ Feedback:\*\*\n/, '')
             }));
           
           setEvaluations(evals);
@@ -277,7 +275,6 @@ const Chat = () => {
           <ResultsView
             questions={questions}
             evaluations={evaluations}
-            onShowSources={(chunks) => setShowResumeSources(chunks)}
           />
         )}
 
@@ -299,14 +296,6 @@ const Chat = () => {
           </div>
         )}
       </div>
-
-      {/* Resume Sources Modal */}
-      {showResumeSources && (
-        <ResumeSources
-          chunks={showResumeSources}
-          onClose={() => setShowResumeSources(null)}
-        />
-      )}
     </div>
   );
 };
@@ -539,7 +528,7 @@ const FinalResultsBanner = ({ session }) => {
   );
 };
 
-// Results View Component
+// Results View Component - ONLY RELEVANCE AND CORRECTNESS
 const ResultsView = ({ questions, evaluations }) => {
   return (
     <div className="space-y-6">
@@ -559,9 +548,8 @@ const ResultsView = ({ questions, evaluations }) => {
           </div>
           
           <div className="p-6">
-            {/* Scores */}
-            <div className="grid grid-cols-3 gap-4 mb-6">
-              <ScoreCard label="Overall" score={evaluation.score} />
+            {/* Scores - Only Relevance and Correctness */}
+            <div className="grid grid-cols-2 gap-4 mb-6">
               <ScoreCard label="Relevance" score={evaluation.relevanceScore} />
               <ScoreCard label="Correctness" score={evaluation.correctnessScore} />
             </div>
@@ -595,58 +583,6 @@ const ScoreCard = ({ label, score }) => {
     <div className={`rounded-lg p-4 border-2 ${getScoreColor(score)} text-center`}>
       <div className="text-3xl font-bold mb-1">{score}/10</div>
       <div className="text-sm font-semibold">{label}</div>
-    </div>
-  );
-};
-
-// Resume Sources Modal Component
-const ResumeSources = ({ chunks, onClose }) => {
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={onClose}>
-      <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-gradient-to-r from-indigo-50 to-purple-50">
-          <div>
-            <h3 className="text-xl font-bold text-gray-900">Resume Context Used</h3>
-            <p className="text-sm text-gray-600">AI analyzed these sections from your resume</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 p-2 hover:bg-gray-100 rounded-lg transition"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          {chunks.map((chunk, index) => (
-            <div key={index} className="bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl p-4 border border-gray-200">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-semibold text-gray-700 flex items-center">
-                  <span className="w-6 h-6 bg-indigo-600 text-white rounded-full flex items-center justify-center text-xs mr-2">
-                    {chunk.index}
-                  </span>
-                  Section {chunk.index}
-                </span>
-                <span className="text-xs bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full font-semibold">
-                  {(parseFloat(chunk.similarity) * 100).toFixed(1)}% Match
-                </span>
-              </div>
-              <p className="text-gray-700 text-sm leading-relaxed">{chunk.text}</p>
-            </div>
-          ))}
-        </div>
-
-        <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
-          <button
-            onClick={onClose}
-            className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-xl font-semibold hover:shadow-lg transition"
-          >
-            Close
-          </button>
-        </div>
-      </div>
     </div>
   );
 };
